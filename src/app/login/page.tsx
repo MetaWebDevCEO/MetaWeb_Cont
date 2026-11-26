@@ -1,8 +1,5 @@
 import type { Metadata } from "next";
-import { Button } from "@/components/ui/button";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { PasswordInput } from "./password-input";
+import { LoginForm } from "./login-form";
 import { SocialAuthButtons } from "./social-auth-buttons";
 
 export const metadata: Metadata = {
@@ -70,46 +67,7 @@ export default function LoginPage() {
             <span className="h-px flex-1 bg-white/10" />
           </div>
 
-          <form>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="email" className="text-white">
-                  Correo electrónico
-                </FieldLabel>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="nombre@empresa.com"
-                  className="h-11 border-white/20 bg-white px-3.5 text-foreground placeholder:text-muted-foreground focus-visible:border-[#1D6E47] focus-visible:ring-[#1D6E47]/40 [&:-webkit-autofill]:bg-white [&:-webkit-autofill]:shadow-[inset_0_0_0px_1000px_white] [&:-webkit-autofill]:[-webkit-text-fill-color:inherit]"
-                />
-              </Field>
-
-              <Field>
-                <FieldLabel htmlFor="password" className="text-white">
-                  Contraseña
-                </FieldLabel>
-                <PasswordInput
-                  id="password"
-                  name="password"
-                  autoComplete="current-password"
-                  placeholder="••••••••"
-                  className="h-11 border-white/20 bg-white px-3.5 text-foreground placeholder:text-muted-foreground focus-visible:border-[#1D6E47] focus-visible:ring-[#1D6E47]/40 [&:-webkit-autofill]:bg-white [&:-webkit-autofill]:shadow-[inset_0_0_0px_1000px_white] [&:-webkit-autofill]:[-webkit-text-fill-color:inherit]"
-                />
-                <p className="text-xs text-white/40">
-                  Debe tener al menos 8 caracteres.
-                </p>
-              </Field>
-            </FieldGroup>
-
-            <Button
-              type="button"
-              className="mt-8 h-11 w-full rounded-xl bg-[#133524] font-semibold text-white transition-all duration-300 ease-out hover:scale-[1.02] hover:bg-white hover:text-black active:scale-[0.98] focus-visible:ring-white/50 motion-reduce:transition-none motion-reduce:hover:scale-100 motion-reduce:active:scale-100"
-            >
-              Iniciar sesión
-            </Button>
-          </form>
+          <LoginForm />
         </div>
         <footer className="flex items-center justify-center gap-1.5 text-[11px] text-white/60 sm:text-xs">
           <span>Desarrollado por</span>

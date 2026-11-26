@@ -1,8 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ReceiptTextIcon, SaveIcon } from "lucide-react";
+import {
+  FileIcon,
+  FileUpIcon,
+  ReceiptTextIcon,
+  SaveIcon,
+  XIcon,
+} from "lucide-react";
+import { cn } from "cn";
 import { sileo } from "sileo";
 
 import { Badge } from "@/components/ui/badge";
@@ -12,10 +19,18 @@ import {
   CardAction,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import {
   Empty,
   EmptyDescription,
@@ -24,7 +39,6 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
@@ -64,6 +78,109 @@ const TIPOS: Record<string, string> = {
   P: "Pago",
 };
 
+function SubidaArchivo({
+  id,
+  etiqueta,
+  accept,
+  inputRef,
+  nombre,
+  alSeleccionar,
+  alLimpiar,
+  descripcion,
+  opcional,
+  deshabilitado,
+  preview,
+}: {
+  id: string;
+  etiqueta: string;
+  accept: string;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  nombre: string | null;
+  alSeleccionar: (archivo: File) => void;
+  alLimpiar: () => void;
+  descripcion: string;
+  opcional?: boolean;
+  deshabilitado?: boolean;
+  preview?: React.ReactNode;
+}) {
+  const [sobre, setSobre] = useState(false);
+
+  return (
+    <Field>
+      <div className="flex items-center justify-between gap-2">
+        <FieldLabel htmlFor={id}>{etiqueta}</FieldLabel>
+        {opcional ? (
+          <span className="text-xs font-normal text-muted-foreground">Opcional</span>
+        ) : null}
+      </div>
+
+      <input
+        id={id}
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        disabled={deshabilitado}
+        className="sr-only"
+        onChange={(evento) => {
+          const archivo = evento.target.files?.[0];
+          if (archivo) alSeleccionar(archivo);
+        }}
+      />
+
+      {nombre ? (
+        <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <FileIcon className="size-4 shrink-0 text-brand-green" />
+              <span className="truncate text-sm">{nombre}</span>
+            </div>
+            <button
+              type="button"
+              onClick={alLimpiar}
+              disabled={deshabilitado}
+              className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+              aria-label={`Quitar ${etiqueta}`}
+            >
+              <XIcon className="size-4" />
+            </button>
+          </div>
+          {preview ? <div className="overflow-hidden">{preview}</div> : null}
+        </div>
+      ) : (
+        <label
+          htmlFor={id}
+          onDragOver={(evento) => {
+            evento.preventDefault();
+            setSobre(true);
+          }}
+          onDragLeave={() => setSobre(false)}
+          onDrop={(evento) => {
+            evento.preventDefault();
+            setSobre(false);
+            const archivo = evento.dataTransfer.files?.[0];
+            if (archivo && !deshabilitado) alSeleccionar(archivo);
+          }}
+          className={cn(
+            "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors",
+            sobre
+              ? "border-brand-green bg-brand-green/5"
+              : "border-border hover:border-brand-green/60 hover:bg-muted/40",
+            deshabilitado && "pointer-events-none opacity-50"
+          )}
+        >
+          <FileUpIcon className="size-6 text-muted-foreground" />
+          <div className="text-sm">
+            <span className="font-medium text-foreground">Selecciona un archivo</span>{" "}
+            <span className="text-muted-foreground">o arrástralo aquí</span>
+          </div>
+        </label>
+      )}
+
+      <FieldDescription>{descripcion}</FieldDescription>
+    </Field>
+  );
+}
+
 export function CfdiCliente({ cfdis }: { cfdis: CfdiGuardado[] }) {
   const router = useRouter();
   const xmlRef = useRef<HTMLInputElement>(null);
@@ -73,13 +190,25 @@ export function CfdiCliente({ cfdis }: { cfdis: CfdiGuardado[] }) {
   const [xml, setXml] = useState<string | null>(null);
   const [nombreXml, setNombreXml] = useState<string | null>(null);
   const [nombrePdf, setNombrePdf] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
+  const [abierto, setAbierto] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    };
+  }, [pdfUrl]);
 
   const limpiar = () => {
     setDatos(null);
     setXml(null);
     setNombreXml(null);
     setNombrePdf(null);
+    if (pdfUrl) {
+      URL.revokeObjectURL(pdfUrl);
+      setPdfUrl(null);
+    }
     if (xmlRef.current) xmlRef.current.value = "";
     if (pdfRef.current) pdfRef.current.value = "";
   };
@@ -114,17 +243,21 @@ export function CfdiCliente({ cfdis }: { cfdis: CfdiGuardado[] }) {
     if (!esPdf) {
       if (pdfRef.current) pdfRef.current.value = "";
       setNombrePdf(null);
+      setPdfUrl(null);
       sileo.error({ title: "El archivo del PDF no es válido." });
       return;
     }
     if (archivo.size > MAX_PDF) {
       if (pdfRef.current) pdfRef.current.value = "";
       setNombrePdf(null);
+      setPdfUrl(null);
       sileo.error({ title: "El PDF supera el tamaño máximo de 5 MB." });
       return;
     }
 
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
     setNombrePdf(archivo.name);
+    setPdfUrl(URL.createObjectURL(archivo));
   };
 
   const guardar = async () => {
@@ -138,6 +271,7 @@ export function CfdiCliente({ cfdis }: { cfdis: CfdiGuardado[] }) {
       const resultado = await guardarCfdi({ xml, datos });
       if (resultado.ok) {
         limpiar();
+        setAbierto(false);
         router.refresh();
         sileo.success({ title: "CFDI guardado correctamente." });
       } else {
@@ -150,77 +284,140 @@ export function CfdiCliente({ cfdis }: { cfdis: CfdiGuardado[] }) {
 
   return (
     <div className="flex flex-1 flex-col gap-6 px-6 pb-14">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-medium tracking-tight">CFDI</h1>
-        <p className="text-sm text-muted-foreground">
-          Adjunta el XML y el PDF de un CFDI para leer sus datos y registrarlo.
-        </p>
-      </header>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Adjuntar CFDI</CardTitle>
-          <CardDescription>
-            El XML contiene los datos del comprobante. El PDF es la representación impresa y solo se
-            verifica el tipo y el tamaño.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <FieldGroup>
-            <div className="grid gap-5 sm:grid-cols-2">
-              <Field>
-                <FieldLabel htmlFor="cfdi-xml">XML del CFDI</FieldLabel>
-                <Input
-                  id="cfdi-xml"
-                  ref={xmlRef}
-                  type="file"
-                  accept=".xml,application/xml,text/xml"
-                  disabled={guardando}
-                  onChange={(evento) => {
-                    const archivo = evento.target.files?.[0];
-                    if (archivo) void leerXml(archivo);
-                  }}
-                />
-                <FieldDescription>
-                  {nombreXml ?? "Obligatorio. Tamaño máximo 1 MB."}
-                </FieldDescription>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="cfdi-pdf">PDF del CFDI</FieldLabel>
-                <Input
-                  id="cfdi-pdf"
-                  ref={pdfRef}
-                  type="file"
-                  accept="application/pdf,.pdf"
-                  disabled={guardando}
-                  onChange={(evento) => {
-                    const archivo = evento.target.files?.[0];
-                    if (archivo) leerPdf(archivo);
-                  }}
-                />
-                <FieldDescription>
-                  {nombrePdf ?? "Opcional. Tamaño máximo 5 MB."}
-                </FieldDescription>
-              </Field>
-            </div>
-          </FieldGroup>
-        </CardContent>
-        {datos ? (
-          <CardFooter className="justify-end gap-2">
-            <Button variant="ghost" onClick={limpiar} disabled={guardando}>
-              Limpiar
-            </Button>
-            <Button onClick={guardar} disabled={guardando}>
-              {guardando ? (
-                <Spinner data-icon="inline-start" />
-              ) : (
-                <SaveIcon data-icon="inline-start" />
-              )}
-              Guardar CFDI
-            </Button>
-          </CardFooter>
-        ) : null}
-      </Card>
+      <Sheet open={abierto} onOpenChange={setAbierto}>
+        <SheetTrigger
+          render={
+            <Button className="w-fit bg-brand-green text-white hover:bg-brand-green/90" />
+          }
+        >
+          Cargas CFDI
+        </SheetTrigger>
+        <SheetContent
+          className="dark inset-y-4 right-4 h-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border-0 bg-sidebar p-0 shadow-2xl"
+        >
+          <SheetHeader className="border-b p-5">
+            <SheetTitle>Adjuntar CFDI</SheetTitle>
+            <SheetDescription>
+              El XML contiene los datos del comprobante. El PDF es la representación impresa y solo se
+              verifica el tipo y el tamaño.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto p-5">
+            <FieldGroup>
+              <SubidaArchivo
+                id="cfdi-xml"
+                etiqueta="XML del CFDI"
+                accept=".xml,application/xml,text/xml"
+                inputRef={xmlRef}
+                nombre={nombreXml}
+                alSeleccionar={(archivo) => void leerXml(archivo)}
+                alLimpiar={() => {
+                  setDatos(null);
+                  setXml(null);
+                  setNombreXml(null);
+                  if (xmlRef.current) xmlRef.current.value = "";
+                }}
+                descripcion="Obligatorio. Tamaño máximo 1 MB."
+                deshabilitado={guardando}
+                preview={
+                  datos ? (
+                    <div className="flex flex-col gap-3 border-t pt-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <ReceiptTextIcon className="size-4 text-brand-green" />
+                          <span className="text-sm font-medium">
+                            {TIPOS[datos.tipoDeComprobante] ?? datos.tipoDeComprobante}
+                          </span>
+                        </div>
+                        {datos.timbre?.uuid ? (
+                          <Badge variant="outline" className="font-mono text-xs">
+                            {datos.timbre.uuid.slice(0, 8)}…
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Emisor</p>
+                          <p className="truncate font-medium" title={datos.emisor.nombre ?? ""}>
+                            {datos.emisor.nombre}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Receptor</p>
+                          <p className="truncate font-medium" title={datos.receptor.nombre ?? ""}>
+                            {datos.receptor.nombre}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Folio</p>
+                          <p className="font-medium">{datos.folio}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Fecha</p>
+                          <p className="font-medium">{fecha(datos.fecha)}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between rounded-md bg-muted px-3 py-2">
+                        <span className="text-xs text-muted-foreground">Total</span>
+                        <span className="font-semibold tabular-nums">
+                          {importe(datos.total)} {datos.moneda}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null
+                }
+              />
+              <SubidaArchivo
+                id="cfdi-pdf"
+                etiqueta="PDF del CFDI"
+                accept="application/pdf,.pdf"
+                inputRef={pdfRef}
+                nombre={nombrePdf}
+                alSeleccionar={leerPdf}
+                alLimpiar={() => {
+                  setNombrePdf(null);
+                  if (pdfUrl) {
+                    URL.revokeObjectURL(pdfUrl);
+                    setPdfUrl(null);
+                  }
+                  if (pdfRef.current) pdfRef.current.value = "";
+                }}
+                descripcion="Opcional. Tamaño máximo 5 MB."
+                opcional
+                deshabilitado={guardando}
+                preview={
+                  pdfUrl ? (
+                    <iframe
+                      src={pdfUrl}
+                      title="Previsualización del PDF"
+                      className="h-48 w-full rounded-md border bg-background"
+                    />
+                  ) : null
+                }
+              />
+            </FieldGroup>
+          </div>
+          {datos ? (
+            <SheetFooter className="border-t p-5">
+              <Button variant="ghost" onClick={limpiar} disabled={guardando}>
+                Limpiar
+              </Button>
+              <Button
+                onClick={guardar}
+                disabled={guardando}
+                className="bg-brand-green text-white hover:bg-brand-green/90"
+              >
+                {guardando ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <SaveIcon data-icon="inline-start" />
+                )}
+                Guardar CFDI
+              </Button>
+            </SheetFooter>
+          ) : null}
+        </SheetContent>
+      </Sheet>
 
       {datos ? <DetalleCfdi datos={datos} /> : null}
 
@@ -284,16 +481,16 @@ function DetalleCfdi({ datos }: { datos: Cfdi }) {
           <div className="flex flex-col gap-2">
             <h3 className="text-sm font-medium">Conceptos</h3>
             <div className="rounded-lg border">
-              <Table>
+              <Table className="table-fixed [&_td]:truncate [&_th]:truncate">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Clave</TableHead>
-                    <TableHead>Cantidad</TableHead>
-                    <TableHead>Unidad</TableHead>
-                    <TableHead>Descripción</TableHead>
-                    <TableHead className="text-right">Valor unitario</TableHead>
-                    <TableHead className="text-right">Importe</TableHead>
-                    <TableHead className="text-right">Descuento</TableHead>
+                    <TableHead className="w-[12%]">Clave</TableHead>
+                    <TableHead className="w-[11%]">Cantidad</TableHead>
+                    <TableHead className="w-[12%]">Unidad</TableHead>
+                    <TableHead className="w-[33%]">Descripción</TableHead>
+                    <TableHead className="w-[12%] text-right">Valor unitario</TableHead>
+                    <TableHead className="w-[10%] text-right">Importe</TableHead>
+                    <TableHead className="w-[10%] text-right">Descuento</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -302,7 +499,7 @@ function DetalleCfdi({ datos }: { datos: Cfdi }) {
                       <TableCell className="font-mono text-xs">{concepto.claveProdServ}</TableCell>
                       <TableCell className="tabular-nums">{concepto.cantidad}</TableCell>
                       <TableCell>{concepto.unidad || concepto.claveUnidad}</TableCell>
-                      <TableCell className="max-w-md truncate">{concepto.descripcion}</TableCell>
+                      <TableCell>{concepto.descripcion}</TableCell>
                       <TableCell className="text-right tabular-nums">
                         {importe(concepto.valorUnitario)}
                       </TableCell>
@@ -361,14 +558,14 @@ function TablaImpuestos({
     <div className="flex flex-col gap-2">
       <h3 className="text-sm font-medium">{titulo}</h3>
       <div className="rounded-lg border">
-        <Table>
+        <Table className="table-fixed [&_td]:truncate [&_th]:truncate">
           <TableHeader>
             <TableRow>
-              <TableHead>Impuesto</TableHead>
-              <TableHead>Tipo de factor</TableHead>
-              <TableHead className="text-right">Base</TableHead>
-              <TableHead className="text-right">Tasa o cuota</TableHead>
-              <TableHead className="text-right">Importe</TableHead>
+              <TableHead className="w-[20%]">Impuesto</TableHead>
+              <TableHead className="w-[24%]">Tipo de factor</TableHead>
+              <TableHead className="w-[18%] text-right">Base</TableHead>
+              <TableHead className="w-[19%] text-right">Tasa o cuota</TableHead>
+              <TableHead className="w-[19%] text-right">Importe</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -410,16 +607,16 @@ function SeccionGuardados({ cfdis }: { cfdis: CfdiGuardado[] }) {
           </Empty>
         ) : (
           <div className="rounded-lg border">
-            <Table>
+            <Table className="table-fixed [&_td]:truncate [&_th]:truncate">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Serie / Folio</TableHead>
-                  <TableHead>Emisor</TableHead>
-                  <TableHead>Receptor</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead>UUID</TableHead>
+                  <TableHead className="w-[14%]">Fecha</TableHead>
+                  <TableHead className="w-[8%]">Tipo</TableHead>
+                  <TableHead className="w-[12%]">Serie / Folio</TableHead>
+                  <TableHead className="w-[13%]">Emisor</TableHead>
+                  <TableHead className="w-[13%]">Receptor</TableHead>
+                  <TableHead className="w-[13%] text-right">Total</TableHead>
+                  <TableHead className="w-[27%]">UUID</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -434,10 +631,8 @@ function SeccionGuardados({ cfdis }: { cfdis: CfdiGuardado[] }) {
                     <TableCell>
                       {[cfdi.serie, cfdi.folio].filter(Boolean).join(" / ") || "—"}
                     </TableCell>
-                    <TableCell className="max-w-xs truncate">{cfdi.emisor_nombre ?? "—"}</TableCell>
-                    <TableCell className="max-w-xs truncate">
-                      {cfdi.receptor_nombre ?? "—"}
-                    </TableCell>
+                    <TableCell>{cfdi.emisor_nombre ?? "—"}</TableCell>
+                    <TableCell>{cfdi.receptor_nombre ?? "—"}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       {cfdi.total === null
                         ? "—"
