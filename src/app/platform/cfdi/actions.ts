@@ -58,14 +58,19 @@ export async function guardarCfdi(entrada: unknown): Promise<GuardarResultado> {
     uso_cfdi: cfdi.receptor.usoCfdi || null,
     datos: cfdi,
     xml: validado.xml,
+    pdf: validado.pdf,
     creado_por: user.id,
   });
 
   if (error) {
+    console.error("[CFDI] Error al guardar:", error);
     if (error.code === "23505") {
       return { ok: false, mensaje: "Este CFDI ya está registrado en tu organización." };
     }
-    return { ok: false, mensaje: "No se pudo guardar el CFDI. Intenta de nuevo." };
+    return {
+      ok: false,
+      mensaje: `No se pudo guardar el CFDI (${error.code}): ${error.message}`,
+    };
   }
 
   revalidatePath("/platform/cfdi");

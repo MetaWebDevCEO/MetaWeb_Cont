@@ -3,7 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  CheckCircle2Icon,
+  FileDownIcon,
   FileIcon,
+  FileTextIcon,
   FileUpIcon,
   ReceiptTextIcon,
   SaveIcon,
@@ -11,6 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "cn";
 import { sileo } from "sileo";
+import JSZip from "jszip";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,6 +69,8 @@ export type CfdiGuardado = {
   emisor_nombre: string | null;
   receptor_nombre: string | null;
   creado_en: string;
+  xml: string;
+  pdf: string | null;
 };
 
 const MAX_XML = 1024 * 1024;
@@ -191,6 +197,7 @@ export function CfdiCliente({ cfdis }: { cfdis: CfdiGuardado[] }) {
   const [nombreXml, setNombreXml] = useState<string | null>(null);
   const [nombrePdf, setNombrePdf] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfBase64, setPdfBase64] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [abierto, setAbierto] = useState(false);
 
@@ -205,6 +212,7 @@ export function CfdiCliente({ cfdis }: { cfdis: CfdiGuardado[] }) {
     setXml(null);
     setNombreXml(null);
     setNombrePdf(null);
+    setPdfBase64(null);
     if (pdfUrl) {
       URL.revokeObjectURL(pdfUrl);
       setPdfUrl(null);
@@ -243,6 +251,7 @@ export function CfdiCliente({ cfdis }: { cfdis: CfdiGuardado[] }) {
     if (!esPdf) {
       if (pdfRef.current) pdfRef.current.value = "";
       setNombrePdf(null);
+      setPdfBase64(null);
       setPdfUrl(null);
       sileo.error({ title: "El archivo del PDF no es válido." });
       return;
@@ -250,14 +259,26 @@ export function CfdiCliente({ cfdis }: { cfdis: CfdiGuardado[] }) {
     if (archivo.size > MAX_PDF) {
       if (pdfRef.current) pdfRef.current.value = "";
       setNombrePdf(null);
+      setPdfBase64(null);
       setPdfUrl(null);
       sileo.error({ title: "El PDF supera el tamaño máximo de 5 MB." });
       return;
     }
 
-    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-    setNombrePdf(archivo.name);
-    setPdfUrl(URL.createObjectURL(archivo));
+    const lector = new FileReader();
+    lector.onload = () => {
+      const resultado = lector.result as string;
+      // data:application/pdf;base64,... -> quitamos el prefijo.
+      const base64 = resultado.split(",")[1] ?? "";
+      setPdfBase64(base64);
+      setNombrePdf(archivo.name);
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+      setPdfUrl(URL.createObjectURL(archivo));
+    };
+    lector.onerror = () => {
+      sileo.error({ title: "No se pudo leer el PDF." });
+    };
+    lector.readAsDataURL(archivo);
   };
 
   const guardar = async () => {
@@ -268,7 +289,7 @@ export function CfdiCliente({ cfdis }: { cfdis: CfdiGuardado[] }) {
 
     setGuardando(true);
     try {
-      const resultado = await guardarCfdi({ xml, datos });
+      const resultado = await guardarCfdi({ xml, datos, pdf: pdfBase64 });
       if (resultado.ok) {
         limpiar();
         setAbierto(false);
@@ -376,6 +397,7 @@ export function CfdiCliente({ cfdis }: { cfdis: CfdiGuardado[] }) {
                 alSeleccionar={leerPdf}
                 alLimpiar={() => {
                   setNombrePdf(null);
+                  setPdfBase64(null);
                   if (pdfUrl) {
                     URL.revokeObjectURL(pdfUrl);
                     setPdfUrl(null);
@@ -585,7 +607,107 @@ function TablaImpuestos({
   );
 }
 
+function CarpetaIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 100 76"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id="carpetaFrente" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#2a9d6a" />
+          <stop offset="100%" stopColor="#1D6E47" />
+        </linearGradient>
+        <linearGradient id="carpetaAtras" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#174f33" />
+          <stop offset="100%" stopColor="#123f28" />
+        </linearGradient>
+      </defs>
+      {/* Parte trasera (pestaña superior) */}
+      <path
+        d="M6 18 Q6 10 14 10 H36 Q40 10 44 14 L48 18 H86 Q94 18 94 26 V30 H6 Z"
+        fill="url(#carpetaAtras)"
+      />
+      {/* Parte frontal */}
+      <path
+        d="M6 24 H94 Q94 31 94 32 V62 Q94 70 86 70 H14 Q6 70 6 62 V32 Q6 24 6 24 Z"
+        fill="url(#carpetaFrente)"
+      />
+      {/* Borde inferior sutil */}
+      <path
+        d="M6 62 Q6 70 14 70 H86 Q94 70 94 62"
+        fill="none"
+        stroke="#0e3322"
+        strokeOpacity="0.25"
+        strokeWidth="1"
+      />
+    </svg>
+  );
+}
+
+function nombreFactura(uuid: string | null) {
+  const clave = (uuid ?? "").trim();
+  return clave ? clave.slice(0, 13).toUpperCase() : "Factura";
+}
+
+function formatearTamano(bytes: number) {
+  if (!bytes || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function FilaArchivo({
+  icono,
+  nombre,
+  fecha,
+  tipo,
+  tamBytes,
+  disponible = true,
+}: {
+  icono: React.ReactNode;
+  nombre: string;
+  fecha: string;
+  tipo: string;
+  tamBytes: number;
+  disponible?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <div className="shrink-0">{icono}</div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{nombre}</p>
+        <p className="truncate text-xs text-muted-foreground">{tipo}</p>
+      </div>
+      <CheckCircle2Icon
+        className={cn(
+          "size-5 shrink-0",
+          disponible ? "text-brand-green" : "text-muted-foreground/40"
+        )}
+      />
+      <span className="hidden w-40 shrink-0 truncate text-right text-xs text-muted-foreground sm:block">
+        {fecha}
+      </span>
+      <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+        {formatearTamano(tamBytes)}
+      </span>
+    </div>
+  );
+}
+
 function SeccionGuardados({ cfdis }: { cfdis: CfdiGuardado[] }) {
+  const [seleccionado, setSeleccionado] = useState<CfdiGuardado | null>(null);
+
+  const abrir = (cfdi: CfdiGuardado) => {
+    setSeleccionado(cfdi);
+  };
+
+  const cerrar = () => {
+    setSeleccionado(null);
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -606,46 +728,116 @@ function SeccionGuardados({ cfdis }: { cfdis: CfdiGuardado[] }) {
             </EmptyHeader>
           </Empty>
         ) : (
-          <div className="rounded-lg border">
-            <Table className="table-fixed [&_td]:truncate [&_th]:truncate">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[14%]">Fecha</TableHead>
-                  <TableHead className="w-[8%]">Tipo</TableHead>
-                  <TableHead className="w-[12%]">Serie / Folio</TableHead>
-                  <TableHead className="w-[13%]">Emisor</TableHead>
-                  <TableHead className="w-[13%]">Receptor</TableHead>
-                  <TableHead className="w-[13%] text-right">Total</TableHead>
-                  <TableHead className="w-[27%]">UUID</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {cfdis.map((cfdi) => (
-                  <TableRow key={cfdi.id}>
-                    <TableCell className="tabular-nums">{fecha(cfdi.fecha ?? "")}</TableCell>
-                    <TableCell>
-                      {cfdi.tipo_comprobante
-                        ? (TIPOS[cfdi.tipo_comprobante] ?? cfdi.tipo_comprobante)
-                        : "—"}
-                    </TableCell>
-                    <TableCell>
-                      {[cfdi.serie, cfdi.folio].filter(Boolean).join(" / ") || "—"}
-                    </TableCell>
-                    <TableCell>{cfdi.emisor_nombre ?? "—"}</TableCell>
-                    <TableCell>{cfdi.receptor_nombre ?? "—"}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {cfdi.total === null
-                        ? "—"
-                        : `${cfdi.moneda ?? ""} ${importe(String(cfdi.total))}`.trim()}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{cfdi.uuid_fiscal ?? "—"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+          <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {cfdis.map((cfdi) => (
+              <button
+                key={cfdi.id}
+                type="button"
+                onClick={() => abrir(cfdi)}
+                className="group flex flex-col items-center gap-2 rounded-lg p-2 text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green"
+              >
+                <CarpetaIcon className="w-16 drop-shadow-sm" />
+                <span
+                  className="w-full truncate text-sm font-medium"
+                  title={nombreFactura(cfdi.uuid_fiscal)}
+                >
+                  {nombreFactura(cfdi.uuid_fiscal)}
+                </span>
+              </button>
+            ))}
           </div>
         )}
       </CardContent>
+
+      <Sheet open={seleccionado !== null} onOpenChange={(ab) => !ab && cerrar()}>
+        <SheetContent
+          showCloseButton={false}
+          className="dark flex max-h-[calc(100vh-2rem)] flex-col inset-y-4 right-4 h-auto w-[calc(100%-2rem)] max-w-3xl rounded-2xl border-0 bg-sidebar p-0 shadow-2xl"
+        >
+          {seleccionado ? (
+            <>
+              <SheetHeader className="shrink-0 border-b p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <SheetTitle className="flex items-center gap-2">
+                      <CarpetaIcon className="w-5" />
+                      {nombreFactura(seleccionado.uuid_fiscal)}
+                    </SheetTitle>
+                    <SheetDescription>
+                      {TIPOS[seleccionado.tipo_comprobante ?? ""] ?? seleccionado.tipo_comprobante} ·{" "}
+                      {seleccionado.emisor_nombre ?? "—"}
+                    </SheetDescription>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={cerrar}
+                    className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label="Cerrar"
+                  >
+                    <XIcon className="size-5" />
+                  </button>
+                </div>
+              </SheetHeader>
+
+              <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-5">
+                <div className="overflow-hidden rounded-lg border bg-card">
+                  <FilaArchivo
+                    icono={<FileTextIcon className="size-5 text-brand-green" />}
+                    nombre={`${nombreFactura(seleccionado.uuid_fiscal)}.xml`}
+                    fecha={fecha(seleccionado.creado_en)}
+                    tipo="Archivo XML"
+                    tamBytes={new Blob([seleccionado.xml]).size}
+                  />
+                  <div className="border-t" />
+                  {seleccionado.pdf ? (
+                    <FilaArchivo
+                      icono={<FileIcon className="size-5 text-brand-green" />}
+                      nombre={`${nombreFactura(seleccionado.uuid_fiscal)}.pdf`}
+                      fecha={fecha(seleccionado.creado_en)}
+                      tipo="Archivo PDF"
+                      tamBytes={Math.floor((seleccionado.pdf.length * 3) / 4)}
+                    />
+                  ) : (
+                    <FilaArchivo
+                      icono={<FileIcon className="size-5 text-muted-foreground" />}
+                      nombre={`${nombreFactura(seleccionado.uuid_fiscal)}.pdf`}
+                      fecha="—"
+                      tipo="No disponible"
+                      tamBytes={0}
+                      disponible={false}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="shrink-0 border-t p-5">
+                <Button
+                  className="w-full bg-brand-green text-white hover:bg-brand-green/90"
+                  onClick={async () => {
+                    const zip = new JSZip();
+                    const nombre = nombreFactura(seleccionado.uuid_fiscal);
+                    zip.file(`${nombre}.xml`, seleccionado.xml);
+                    if (seleccionado.pdf) {
+                      const base64 = seleccionado.pdf.split(",")[1] ?? seleccionado.pdf;
+                      zip.file(`${nombre}.pdf`, base64, { base64: true });
+                    }
+                    const blob = await zip.generateAsync({ type: "blob" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `${nombre}.zip`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  <FileDownIcon className="size-4" />
+                  Descargar documentos
+                </Button>
+              </div>
+            </>
+          ) : null}
+        </SheetContent>
+      </Sheet>
     </Card>
   );
 }
@@ -659,11 +851,21 @@ function Bloque({ titulo, children }: { titulo: string; children: React.ReactNod
   );
 }
 
-function Dato({ etiqueta, valor }: { etiqueta: string; valor: string }) {
+function Dato({
+  etiqueta,
+  valor,
+  mono,
+}: {
+  etiqueta: string;
+  valor: string | null;
+  mono?: boolean;
+}) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
       <dt className="text-xs text-muted-foreground">{etiqueta}</dt>
-      <dd className="truncate text-sm tabular-nums">{valor || "—"}</dd>
+      <dd className={cn("truncate text-sm", mono ? "font-mono text-xs" : "tabular-nums")}>
+        {valor || "—"}
+      </dd>
     </div>
   );
 }

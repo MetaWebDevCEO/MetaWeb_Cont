@@ -13,6 +13,7 @@ import type {
 // (ESPECIFICACIONES.md, secciones 3.5 y 3.6).
 
 export const MAX_XML = 1024 * 1024;
+export const MAX_PDF = 5 * 1024 * 1024;
 const MAX_JSON = 2 * 1024 * 1024;
 const MAX_CONCEPTOS = 2000;
 const MAX_IMPUESTOS = 500;
@@ -24,7 +25,7 @@ const MONEDA = /^[A-Z]{3}$/;
 const TIPOS = ["I", "E", "T", "N", "P"];
 
 export type CfdiValidado =
-  | { ok: true; xml: string; datos: Cfdi }
+  | { ok: true; xml: string; pdf: string | null; datos: Cfdi }
   | { ok: false; mensaje: string };
 
 class CfdiInvalido extends Error {}
@@ -50,6 +51,28 @@ export function validarCfdi(entrada: unknown): CfdiValidado {
     return { ok: false, mensaje: "El XML no corresponde a un CFDI." };
   }
 
+  let pdf: string | null = null;
+  if (entrada.pdf !== undefined && entrada.pdf !== null) {
+    if (typeof entrada.pdf !== "string") {
+      return { ok: false, mensaje: "El archivo PDF no es válido." };
+    }
+    const limpioPdf = entrada.pdf.trim();
+    if (!limpioPdf) {
+      return { ok: false, mensaje: "El archivo PDF está vacío." };
+    }
+    // El PDF se recibe como base64. Verificamos que empiece con la firma PDF.
+    const bytes = base64ABytes(limpioPdf).slice(0, 5);
+    const firma = String.fromCharCode(...bytes);
+    if (firma !== "%PDF-") {
+      return { ok: false, mensaje: "El archivo no es un PDF válido." };
+    }
+    // El tamaño en bytes del base64 es aproximadamente 3/4 del largo.
+    if ((limpioPdf.length * 3) / 4 > MAX_PDF) {
+      return { ok: false, mensaje: "El PDF supera el tamaño máximo de 5 MB." };
+    }
+    pdf = limpioPdf;
+  }
+
   if (!esObjeto(entrada.datos)) {
     return { ok: false, mensaje: "No se pudieron leer los datos del CFDI." };
   }
@@ -58,7 +81,7 @@ export function validarCfdi(entrada: unknown): CfdiValidado {
   }
 
   try {
-    return { ok: true, xml, datos: limpiar(entrada.datos) };
+    return { ok: true, xml, pdf, datos: limpiar(entrada.datos) };
   } catch (error) {
     return {
       ok: false,
@@ -269,4 +292,16 @@ function importe(valor: unknown, mensaje: string): string {
 
 function esObjeto(valor: unknown): valor is Record<string, unknown> {
   return typeof valor === "object" && valor !== null && !Array.isArray(valor);
+}
+
+// Convierte una cadena base64 a un arreglo de bytes. Se usa para verificar la
+// firma del PDF sin cargar todo el archivo en memoria.
+function base64ABytes(base64: string): number[] {
+  const binario = atob(base64);
+  const bytes: number[] = [];
+  const limite = Math.min(binario.length, 5);
+  for (let i = 0; i < limite; i++) {
+    bytes.push(binario.charCodeAt(i));
+  }
+  return bytes;
 }

@@ -44,9 +44,13 @@ create table if not exists public.cfdi (
   uso_cfdi text,
   datos jsonb not null,
   xml text not null,
+  pdf text,
   creado_por uuid references auth.users(id) on delete set null,
   creado_en timestamptz not null default now()
 );
+
+-- Añade la columna pdf en despliegues donde la tabla cfdi ya existía.
+alter table public.cfdi add column if not exists pdf text;
 
 create index if not exists cfdi_organizacion_idx
   on public.cfdi (organizacion_id, creado_en desc);
